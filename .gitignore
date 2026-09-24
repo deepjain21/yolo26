@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+uploads/*
+samples/*
+models/*
+!uploads/.gitkeep
+!samples/.gitkeep
+!models/.gitkeep
+.playwright-mcp/
+.DS_Store
+
+# videos (uploaded separately)
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.avi
+*.mkv
+*.webm

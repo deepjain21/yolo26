@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Facility Monitor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23f2f2ee'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="conn" id="conn-dot" role="status" aria-label="Server connection"></span>
+    <h1>Facility Monitor</h1>
+    <span class="brand-sub">People tracking and lighting compliance</span>
+  </div>
+  <div class="topbar-right">
+    <span class="muted hint" id="seek-hint" hidden>Arrow keys seek 10 s</span>
+    <div class="seg" role="group" aria-label="Theme" id="theme-seg">
+      <button type="button" data-theme="dark" aria-pressed="true">Night</button>
+      <button type="button" data-theme="light" aria-pressed="false">Day</button>
+    </div>
+  </div>
+</header>
+<div class="notice" id="notice" role="alert" hidden><span id="notice-text"></span><button type="button" class="notice-close" id="notice-close" aria-label="Dismiss">Dismiss</button></div>
+
+<main class="layout">
+  <aside class="sidebar" aria-label="Source and settings">
+    <form class="source-panel" id="controls" onsubmit="return false">
+      <h2>Source</h2>
+      <select id="source" aria-label="Video source"></select>
+      <div class="source-row">
+        <label class="btn secondary" for="file-input">Upload video</label>
+        <input type="file" id="file-input" accept="video/*" hidden>
+        <label class="check"><input type="checkbox" id="loop" checked><span>Loop</span></label>
+        <label class="check"><input type="checkbox" id="max-speed"><span>Max speed</span></label>
+      </div>
+      <div class="source-actions">
+        <button type="button" class="btn primary" id="start">Start</button>
+        <button type="button" class="btn danger" id="stop" disabled>Stop</button>
+      </div>
+    </form>
+    <h2 class="sidebar-title">Settings</h2>
+    <section class="settings">
+      <details open>
+        <summary>Lighting test</summary>
+        <div class="fields">
+          <div class="field range">
+            <span>Simulated light level <output class="mono" id="o-gain">100</output>%</span>
+            <input type="range" id="s-light_gain" min="0" max="200" step="5" value="100" aria-label="Simulated light level, percent of recorded">
+            <div class="presets" id="gain-presets">
+              <button type="button" data-gain="10">Dark</button>
+              <button type="button" data-gain="40">Dim</button>
+              <button type="button" data-gain="100">As recorded</button>
+              <button type="button" data-gain="150">Bright</button>
+            </div>
+            <small>Every frame is dimmed or brightened before detection, so the video, the brightness meter and the Lights rule all react. Use it to check that a lights-off alert fires and resolves.</small>
+          </div>
+          <label class="field range"><span>Lights on above <output class="mono" id="o-on"></output>%</span>
+            <input type="range" id="s-lights_on_threshold" min="0" max="100" step="1"></label>
+          <label class="field range"><span>Lights off below <output class="mono" id="o-off"></output>%</span>
+            <input type="range" id="s-lights_off_threshold" min="0" max="100" step="1"></label>
+        </div>
+      </details>
+      <details open>
+        <summary>Rules</summary>
+        <div class="fields two">
+          <label class="field"><span>Minimum people</span><input type="number" id="s-min_people" min="0" max="50"></label>
+          <label class="field"><span>Maximum people</span><input type="number" id="s-max_people" min="0" max="200"><small>0 disables</small></label>
+          <label class="field"><span>Grace period</span><input type="number" id="s-grace_seconds" min="0" max="60" step="0.5"><small>seconds before alerting</small></label>
+          <label class="check block"><input type="checkbox" id="s-lights_required"><span>Lights must be on</span></label>
+        </div>
+      </details>
+      <details>
+        <summary>Detection</summary>
+        <div class="fields two">
+          <label class="field"><span>Model</span>
+            <select id="s-model">
+              <option value="people-detection">People Detection, crowd YOLO26x</option>
+              <option value="yolo26n">YOLO26n, fastest</option>
+              <option value="yolo26s">YOLO26s</option>
+              <option value="yolo26m">YOLO26m</option>
+              <option value="yolo11n">YOLO11n, previous gen</option>
+              <option value="yolo11s">YOLO11s, previous gen</option>
+              <option value="yolo11m">YOLO11m, previous gen</option>
+            </select></label>
+          <label class="field"><span>Image size</span>
+            <select id="s-imgsz"><option>480</option><option>640</option><option>960</option><option>1280</option></select><small>higher finds smaller people</small></label>
+          <label class="field"><span>Confidence</span><input type="number" id="s-conf" min="0.05" max="0.95" step="0.05"></label>
+          <label class="field"><span>Detect every</span><input type="number" id="s-process_every_n" min="1" max="10"><small>frames</small></label>
+        </div>
+        <p class="help">People Detection finds the most people but takes about 2 s per detection on a CPU. Switch to YOLO26n for smooth real-time playback.</p>
+      </details>
+      <p class="save-state" id="settings-status">Changes apply while running.</p>
+    </section>
+  </aside>
+
+  <section class="stage">
+    <div class="video-wrap" id="video-wrap" data-state="idle">
+      <img id="video" src="/stream.mjpg" alt="Live annotated video">
+      <div class="overlay idle-state">
+        <p class="overlay-title">No source running</p>
+        <p class="overlay-body">Choose a sample, an upload or the webcam above and press Start.</p>
+        <p class="overlay-hint">The sample <span class="mono">demo_lights_and_people.mp4</span> walks through all clear, lights off and an empty room.</p>
+      </div>
+      <div class="overlay loading-state">
+        <div class="skeleton"></div>
+        <p class="overlay-title" id="loading-text">Opening source</p>
+      </div>
+    </div>
+
+    <div class="transport" id="transport" data-enabled="false">
+      <div class="transport-buttons">
+        <button type="button" class="tbtn" id="seek-back" title="Back 10 seconds (Left arrow)" disabled>
+          <span aria-hidden="true">&#8249;</span><span class="mono">10 s</span>
+        </button>
+        <button type="button" class="tbtn" id="seek-fwd" title="Forward 10 seconds (Right arrow)" disabled>
+          <span class="mono">10 s</span><span aria-hidden="true">&#8250;</span>
+        </button>
+      </div>
+      <span class="mono t-now" id="t-now">0:00.0</span>
+      <input type="range" class="seek" id="seek" min="0" max="1000" value="0" step="1" aria-label="Playback position" disabled>
+      <span class="mono t-total" id="t-total">0:00.0</span>
+    </div>
+
+    <div class="stage-meta">
+      <span class="src" id="src-name">No source</span>
+      <span class="chip mono" id="model-label" hidden></span>
+      <span class="chip mono" id="fps-label" hidden></span>
+      <span class="chip mono sim" id="light-sim-label" hidden></span>
+      <span class="muted" id="dropped-label"></span>
+    </div>
+  </section>
+
+  <section class="timeline">
+    <div class="section-head">
+      <h2>Timeline</h2>
+      <p class="muted">Last 5 minutes. Red bands mark active alerts.</p>
+    </div>
+    <div class="chart" id="chart-people"><span class="chart-title">People in frame</span><canvas></canvas><div class="tooltip mono"></div></div>
+    <div class="chart" id="chart-bright"><span class="chart-title">Brightness, %</span><canvas></canvas><div class="tooltip mono"></div></div>
+  </section>
+
+  <aside class="results" aria-label="Live results">
+    <section class="status" id="status" data-status="idle">
+      <div class="status-head">
+        <span class="status-label" id="status-label">Idle</span>
+        <span class="status-sub" id="status-sub">Waiting for a source</span>
+      </div>
+      <ul class="alert-list" id="active-alerts"></ul>
+    </section>
+
+    <section class="kpis">
+      <div class="kpi">
+        <span class="kpi-label">People in frame</span>
+        <span class="kpi-value mono" id="k-people">0</span>
+        <span class="kpi-foot" id="k-ids">No active tracks</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Unique people</span>
+        <span class="kpi-value mono" id="k-unique">0</span>
+        <span class="kpi-foot">Since source started</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Lights <span class="kpi-tag" id="k-sim" hidden>simulated</span></span>
+        <span class="kpi-value" id="k-lights">Unknown</span>
+        <div class="meter" aria-hidden="true">
+          <div class="meter-fill" id="bright-fill"></div>
+          <div class="meter-mark off" id="mark-off" title="OFF threshold"></div>
+          <div class="meter-mark on" id="mark-on" title="ON threshold"></div>
+        </div>
+        <span class="kpi-foot">Brightness <span class="mono" id="k-bright">0</span>%</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Throughput</span>
+        <span class="kpi-value mono" id="k-fps">0</span>
+        <span class="kpi-foot">Frames per second</span>
+      </div>
+    </section>
+
+    <section class="events">
+    <div class="section-head">
+      <h2>Events <span class="count mono" id="ev-count">0</span></h2>
+      <a class="btn secondary small" href="/api/events.csv" download>Export CSV</a>
+    </div>
+    <div class="event-list" id="events"><p class="empty">No events yet. Alerts and their resolutions appear here with a snapshot.</p></div>
+    </section>
+  </aside>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
